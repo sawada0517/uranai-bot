@@ -353,6 +353,8 @@ async def handle_help(reply_token: str):
         "❌「解約」→ サブスク解約\\n"
     )
 
+    await reply_message(reply_token, [{"type": "text", "text": help_msg}])
+
 
 # ─── LINE Webhook エンドポイント ─────────────────────────────
 @app.post("/webhook")
