@@ -53,6 +53,7 @@ class Database:
         conn.close()
         print("✅ Database initialized")
 
+    # ─── ユーザー管理 ──────────────────────────────────────
     def upsert_user(self, line_user_id: str):
         conn = self._connect()
         conn.execute(
@@ -82,6 +83,7 @@ class Database:
         conn.close()
         return dict(row) if row else None
 
+    # ─── 課金管理 ──────────────────────────────────────────
     def upgrade_to_premium(
         self, line_user_id: str, subscription_id: str, customer_id: str
     ):
@@ -115,6 +117,7 @@ class Database:
         conn.commit()
         conn.close()
 
+    # ─── 占い履歴 ─────────────────────────────────────────
     def save_reading(
         self, line_user_id: str, cards: list[dict], question: str, reading_text: str
     ):

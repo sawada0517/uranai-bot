@@ -64,7 +64,7 @@ def verify_signature(body: bytes, signature: str) -> bool:
 
 # ─── LINE メッセージ送信 ────────────────────────────────────
 async def reply_message(reply_token: str, messages: list[dict]):
-    """LINE获リプライメッセージを送信"""
+    """LINEにリプライメッセージを送信"""
     async with httpx.AsyncClient() as client:
         await client.post(
             "https://api.line.me/v2/bot/message/reply",
