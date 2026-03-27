@@ -157,3 +157,8 @@ Stripe Dashboardで新しいPriceを作成し、`STRIPE_PRICE_ID` を更新
 - [ ] LINE公式アカウントのリッチメニューを設定
 - [ ] プライバシーポリシー・利用規約を作成
 - [ ] 特定商取引法に基づく表記を作成
+
+
+## 画像生成プロンプト
+https://docs.google.com/spreadsheets/d/1TQSf56XyEuDK3kOto4pZKbvSk88bDg1n/edit?gid=317327155#gid=317327155
+
