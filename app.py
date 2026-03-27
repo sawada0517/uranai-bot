@@ -233,7 +233,19 @@ async def handle_tarot_reading(user_id: str, text: str, reply_token: str):
         remaining = FREE_DAILY_LIMIT - db.get_today_reading_count(user_id) - 1
         result_msg += f"\n\n{'─' * 20}\n📊 本日の残り回数: {max(0, remaining)}回"
 
-    await reply_message(reply_token, [{"type": "text", "text": result_msg}])
+    # カード画像メッセージを先に送信
+    messages = []
+    for card in cards:
+        image_url = card.get("image_url")
+        if image_url:
+            messages.append({
+                "type": "image",
+                "originalContentUrl": image_url,
+                "previewImageUrl": image_url,
+            })
+    messages.append({"type": "text", "text": result_msg})
+
+    await reply_message(reply_token, messages)
 
     # 履歴を保存
     db.save_reading(user_id, cards, question, reading)
