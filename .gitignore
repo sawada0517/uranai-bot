@@ -29,3 +29,7 @@ Thumbs.db
 # Database
 *.db
 *.sqlite3
+.playwright-mcp/
+py/
+.playwright-mcp/
+py/
