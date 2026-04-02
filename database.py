@@ -54,7 +54,7 @@ class Database:
                         id BIGINT PRIMARY KEY AUTO_INCREMENT,
                         line_user_id VARCHAR(255) NOT NULL,
                         cards JSON NOT NULL,
-                        question TEXT DEFAULT '',
+                        question TEXT NULL,
                         reading_text TEXT NOT NULL,
                         created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
                         INDEX idx_readings_user_date (line_user_id, created_at),
