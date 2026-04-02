@@ -22,8 +22,14 @@ from dotenv import load_dotenv
 
 from database import Database
 from tarot_cards import TAROT_DECK, draw_cards, format_card_display
-from prompts import build_tarot_prompt
+from prompts import build_tarot_prompt, build_system_prompt
 from flex_messages import build_card_flex_message, build_spread_flex_message
+from growth import (
+    get_level_info, is_category_unlocked,
+    build_reading_footer, build_status_message,
+    build_levelup_message, build_lock_message,
+    detect_category,
+)
 
 load_dotenv()
 
@@ -92,9 +98,20 @@ async def push_message(user_id: str, messages: list[dict]):
 
 
 # ─── OpenAI でタロット占い生成 ──────────────────────────────
-async def generate_tarot_reading(cards: list[dict], question: str = "", user_info: dict | None = None) -> str:
+async def generate_tarot_reading(
+    cards: list[dict],
+    question: str = "",
+    user_info: dict | None = None,
+    level_info: dict | None = None,
+) -> str:
     """OpenAI GPTでタロット占いの結果を生成"""
     prompt = build_tarot_prompt(cards, question, user_info)
+    system_prompt = build_system_prompt(level_info) if level_info else (
+        "あなたは神秘的で温かみのあるタロット占い師です。"
+        "日本語で占い結果を伝えてください。"
+        "絵文字を適度に使い、親しみやすく、でも神秘的な雰囲気を保ってください。"
+        "結果は400文字以内に収めてください。"
+    )
 
     async with httpx.AsyncClient(timeout=30.0) as client:
         response = await client.post(
@@ -106,15 +123,7 @@ async def generate_tarot_reading(cards: list[dict], question: str = "", user_inf
             json={
                 "model": "gpt-4o-mini",
                 "messages": [
-                    {
-                        "role": "system",
-                        "content": (
-                            "あなたは神秘的で温かみのあるタロット占い師です。"
-                            "日本語で占い結果を伝えてください。"
-                            "絵文字を適度に使い、親しみやすく、でも神秘的な雰囲気を保ってください。"
-                            "結果は400文字以内に収めてください。"
-                        ),
-                    },
+                    {"role": "system", "content": system_prompt},
                     {"role": "user", "content": prompt},
                 ],
                 "max_tokens": 600,
@@ -256,6 +265,8 @@ async def handle_tarot_reading(user_id: str, text: str, reply_token: str):
         return
 
     is_premium = user["is_premium"]
+    total_before = db.get_total_reading_count(user_id)
+    level_info = get_level_info(total_before)
 
     # 無料ユーザーの回数チェック
     if not is_premium:
@@ -270,55 +281,57 @@ async def handle_tarot_reading(user_id: str, text: str, reply_token: str):
             await reply_message(reply_token, [{"type": "text", "text": limit_msg}])
             return
 
+    # カテゴリ判定
+    category = detect_category(text)
+
+    # カテゴリロックチェック（自由質問はロックなし）
+    if category != "自由質問" and not is_category_unlocked(total_before, category):
+        lock_msg = build_lock_message(category, total_before, is_premium)
+        await reply_message(reply_token, [{"type": "text", "text": lock_msg}])
+        return
+
     # カードを引く（プレミアムは3枚展開、無料は1枚）
     num_cards = 3 if is_premium else 1
     cards = draw_cards(num_cards)
 
-    # カード表示
-    card_display = format_card_display(cards)
-
-    # 質問の判別
-    question = ""
-    keywords_general = ["占って", "占い", "今日の運勢", "運勢", "タロット"]
-    keywords_love = ["恋愛", "恋", "好きな人", "片思い", "復縁", "結婚"]
-    keywords_work = ["仕事", "キャリア", "転職", "就職", "ビジネス"]
-    keywords_money = ["金運", "お金", "収入", "投資", "財運"]
-    keywords_health = ["健康", "体調", "ダイエット"]
-
-    if any(k in text for k in keywords_love):
-        question = "恋愛運について"
-    elif any(k in text for k in keywords_work):
-        question = "仕事運について"
-    elif any(k in text for k in keywords_money):
-        question = "金運について"
-    elif any(k in text for k in keywords_health):
-        question = "健康運について"
-    elif not any(k in text for k in keywords_general):
-        question = text  # ユーザーの質問をそのまま使う
+    # questionの設定
+    from growth import CATEGORY_MAP
+    if category == "自由質問":
+        question = text
+    elif category == "総合運":
+        question = ""
+    else:
+        question = CATEGORY_MAP[category]["question"]
 
     # AI占い結果を生成
     try:
-        reading = await generate_tarot_reading(cards, question, user_info=user)
+        reading = await generate_tarot_reading(cards, question, user_info=user, level_info=level_info)
     except Exception as e:
         print(f"OpenAI API error: {e}")
         reading = "申し訳ありません、星の巡りが乱れているようです...もう一度お試しください🌟"
 
-    # 結果を送信（Flex Message + テキスト）
+    # 履歴を保存
+    db.save_reading(user_id, cards, question, reading)
+    total_after = db.get_total_reading_count(user_id)
+
+    # 結果フッター
+    today_remaining = FREE_DAILY_LIMIT - db.get_today_reading_count(user_id) if not is_premium else 0
+    footer = build_reading_footer(total_after, is_premium, today_remaining)
+    reading_text = f"🔮 鑑定結果\n\n{reading}\n\n{footer}"
+
+    # Flex Message + テキスト送信
     if num_cards == 1:
         flex_msg = build_card_flex_message(cards[0])
     else:
         flex_msg = build_spread_flex_message(cards)
 
-    reading_text = f"🔮 鑑定結果\n\n{reading}"
-    if not is_premium:
-        remaining = FREE_DAILY_LIMIT - db.get_today_reading_count(user_id) - 1
-        reading_text += f"\n\n{'─' * 20}\n📊 本日の残り回数: {max(0, remaining)}回"
-
     messages = [flex_msg, {"type": "text", "text": reading_text}]
     await reply_message(reply_token, messages)
 
-    # 履歴を保存
-    db.save_reading(user_id, cards, question, reading)
+    # レベルアップ通知
+    levelup_msg = build_levelup_message(total_before, total_after)
+    if levelup_msg:
+        await push_message(user_id, [{"type": "text", "text": levelup_msg}])
 
 
 async def handle_premium_request(user_id: str, reply_token: str):
@@ -368,22 +381,9 @@ async def handle_status(user_id: str, reply_token: str):
 
     total = db.get_total_reading_count(user_id)
     today = db.get_today_reading_count(user_id)
+    today_remaining = max(0, FREE_DAILY_LIMIT - today) if not user["is_premium"] else 0
 
-    if user["is_premium"]:
-        plan = "⭐ プレミアム会員"
-        limit_info = "回数制限なし ♾️"
-    else:
-        plan = "🆓 無料プラン"
-        remaining = max(0, FREE_DAILY_LIMIT - today)
-        limit_info = f"本日の残り: {remaining}/{FREE_DAILY_LIMIT}回"
-
-    status_msg = (
-        f"📊 あなたのステータス\n\n"
-        f"プラン: {plan}\n"
-        f"{limit_info}\n"
-        f"累計占い回数: {total}回\n\n"
-        f"{'「プレミアム」で会員登録 💎' if not user['is_premium'] else '毎日の占いをお楽しみください ✨'}"
-    )
+    status_msg = build_status_message(total, user["is_premium"], today_remaining)
     await reply_message(reply_token, [{"type": "text", "text": status_msg}])
 
 
