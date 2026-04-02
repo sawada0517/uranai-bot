@@ -5,6 +5,7 @@ LINE Messaging API + OpenAI GPT + Stripe サブスク課金
 
 import os
 import json
+import re
 import random
 import hashlib
 import hmac
@@ -142,9 +143,70 @@ async def handle_follow(user_id: str, reply_token: str):
     await reply_message(reply_token, [{"type": "text", "text": welcome}])
 
 
+def _parse_birth_date(text: str) -> str | None:
+    """生年月日をパースしてYYYY-MM-DD形式で返す。失敗時はNone"""
+    text = text.strip()
+    patterns = [
+        r"(\d{4})[/\-年](\d{1,2})[/\-月](\d{1,2})",
+        r"(\d{4})(\d{2})(\d{2})",
+    ]
+    for pattern in patterns:
+        m = re.match(pattern, text)
+        if m:
+            y, mo, d = int(m.group(1)), int(m.group(2)), int(m.group(3))
+            try:
+                return date(y, mo, d).isoformat()
+            except ValueError:
+                return None
+    return None
+
+
 async def handle_text_message(user_id: str, text: str, reply_token: str):
     """テキストメッセージの処理"""
     text_lower = text.strip().lower()
+
+    # ── オンボーディング（生年月日・性別の収集）──
+    user = db.get_user(user_id)
+    if user:
+        step = user.get("onboarding_step", 0)
+
+        if step == 1:
+            birth_date = _parse_birth_date(text)
+            if not birth_date:
+                await reply_message(reply_token, [{"type": "text", "text": (
+                    "生年月日の形式が正しくありません。\n"
+                    "例：1990/03/15 または 1990-03-15 で入力してください。"
+                )}])
+                return
+            db.update_birth_date(user_id, birth_date)
+            await reply_message(reply_token, [{
+                "type": "text",
+                "text": "ありがとうございます！\n次に性別を選んでください。",
+                "quickReply": {"items": [
+                    {"type": "action", "action": {"type": "message", "label": "男性", "text": "男性"}},
+                    {"type": "action", "action": {"type": "message", "label": "女性", "text": "女性"}},
+                    {"type": "action", "action": {"type": "message", "label": "その他", "text": "その他"}},
+                ]},
+            }])
+            return
+
+        if step == 2:
+            if text.strip() not in ("男性", "女性", "その他"):
+                await reply_message(reply_token, [{
+                    "type": "text",
+                    "text": "下のボタンから性別を選んでください。",
+                    "quickReply": {"items": [
+                        {"type": "action", "action": {"type": "message", "label": "男性", "text": "男性"}},
+                        {"type": "action", "action": {"type": "message", "label": "女性", "text": "女性"}},
+                        {"type": "action", "action": {"type": "message", "label": "その他", "text": "その他"}},
+                    ]},
+                }])
+                return
+            db.update_gender(user_id, text.strip())
+            await reply_message(reply_token, [{"type": "text", "text": (
+                "登録完了です！\nさっそく占ってみましょう🔮\n\n「占って」と送るか、悩みを入力してください。"
+            )}])
+            return
 
     # ── プレミアム登録 ──
     if text_lower in ("プレミアム", "premium", "サブスク", "課金", "登録"):
@@ -176,6 +238,16 @@ async def handle_tarot_reading(user_id: str, text: str, reply_token: str):
     if not user:
         db.upsert_user(user_id)
         user = db.get_user(user_id)
+
+    # ── 初回：生年月日が未登録ならオンボーディング開始 ──
+    if not user.get("birth_date"):
+        db.set_onboarding_step(user_id, 1)
+        await reply_message(reply_token, [{"type": "text", "text": (
+            "占いの前に、少しだけ教えてください🔮\n\n"
+            "生年月日を入力してください。\n"
+            "例：1990/03/15"
+        )}])
+        return
 
     is_premium = user["is_premium"]
 

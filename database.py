@@ -41,6 +41,9 @@ class Database:
                         is_premium TINYINT(1) NOT NULL DEFAULT 0,
                         stripe_customer_id VARCHAR(255),
                         stripe_subscription_id VARCHAR(255),
+                        birth_date DATE NULL DEFAULT NULL,
+                        gender VARCHAR(10) NULL DEFAULT NULL,
+                        onboarding_step TINYINT NOT NULL DEFAULT 0,
                         created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
                         updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
                         deleted_at DATETIME NULL DEFAULT NULL
@@ -99,6 +102,42 @@ class Database:
                     (subscription_id,),
                 )
                 return cursor.fetchone()
+        finally:
+            conn.close()
+
+    def update_birth_date(self, line_user_id: str, birth_date: str):
+        conn = _get_connection()
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    "UPDATE users SET birth_date = %s, onboarding_step = 2 WHERE line_user_id = %s",
+                    (birth_date, line_user_id),
+                )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def update_gender(self, line_user_id: str, gender: str):
+        conn = _get_connection()
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    "UPDATE users SET gender = %s, onboarding_step = 0 WHERE line_user_id = %s",
+                    (gender, line_user_id),
+                )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def set_onboarding_step(self, line_user_id: str, step: int):
+        conn = _get_connection()
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    "UPDATE users SET onboarding_step = %s WHERE line_user_id = %s",
+                    (step, line_user_id),
+                )
+            conn.commit()
         finally:
             conn.close()
 
