@@ -2,154 +2,227 @@
 🗄️ データベース管理 - ユーザー・占い履歴・課金情報
 """
 
-import sqlite3
 import json
-from datetime import date, datetime
-from pathlib import Path
+import os
+from datetime import date
 
-DB_PATH = Path(__file__).parent / "data" / "tarot.db"
+import pymysql
+import pymysql.cursors
+from dotenv import load_dotenv
+
+load_dotenv()
+
+
+def _get_connection():
+    return pymysql.connect(
+        host=os.getenv("MYSQL_HOST", "localhost"),
+        port=int(os.getenv("MYSQL_PORT", "3306")),
+        user=os.getenv("MYSQL_USER", "root"),
+        password=os.getenv("MYSQL_PASSWORD", ""),
+        database=os.getenv("MYSQL_DATABASE", "uranai_bot"),
+        charset="utf8mb4",
+        cursorclass=pymysql.cursors.DictCursor,
+        autocommit=False,
+    )
 
 
 class Database:
-    def __init__(self, db_path: str = None):
-        self.db_path = db_path or str(DB_PATH)
-
-    def _connect(self):
-        Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
-        conn = sqlite3.connect(self.db_path)
-        conn.row_factory = sqlite3.Row
-        return conn
+    def __init__(self):
+        pass
 
     def initialize(self):
         """テーブル作成"""
-        conn = self._connect()
-        cursor = conn.cursor()
-
-        cursor.executescript("""
-            CREATE TABLE IF NOT EXISTS users (
-                line_user_id TEXT PRIMARY KEY,
-                is_premium INTEGER DEFAULT 0,
-                stripe_customer_id TEXT,
-                stripe_subscription_id TEXT,
-                created_at TEXT DEFAULT (datetime('now')),
-                updated_at TEXT DEFAULT (datetime('now'))
-            );
-
-            CREATE TABLE IF NOT EXISTS readings (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                line_user_id TEXT NOT NULL,
-                cards TEXT NOT NULL,
-                question TEXT DEFAULT '',
-                reading_text TEXT NOT NULL,
-                created_at TEXT DEFAULT (datetime('now')),
-                FOREIGN KEY (line_user_id) REFERENCES users(line_user_id)
-            );
-
-            CREATE INDEX IF NOT EXISTS idx_readings_user_date
-                ON readings(line_user_id, created_at);
-        """)
-
-        conn.commit()
-        conn.close()
-        print("✅ Database initialized")
+        conn = _get_connection()
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS users (
+                        line_user_id VARCHAR(255) PRIMARY KEY,
+                        is_premium TINYINT(1) NOT NULL DEFAULT 0,
+                        stripe_customer_id VARCHAR(255),
+                        stripe_subscription_id VARCHAR(255),
+                        birth_date DATE NULL DEFAULT NULL,
+                        gender VARCHAR(10) NULL DEFAULT NULL,
+                        onboarding_step TINYINT NOT NULL DEFAULT 0,
+                        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                        deleted_at DATETIME NULL DEFAULT NULL
+                    ) CHARACTER SET utf8mb4
+                """)
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS readings (
+                        id BIGINT PRIMARY KEY AUTO_INCREMENT,
+                        line_user_id VARCHAR(255) NOT NULL,
+                        cards JSON NOT NULL,
+                        question TEXT DEFAULT '',
+                        reading_text TEXT NOT NULL,
+                        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        INDEX idx_readings_user_date (line_user_id, created_at),
+                        FOREIGN KEY (line_user_id) REFERENCES users(line_user_id)
+                    ) CHARACTER SET utf8mb4
+                """)
+            conn.commit()
+            print("✅ Database initialized")
+        finally:
+            conn.close()
 
     # ─── ユーザー管理 ──────────────────────────────────────
     def upsert_user(self, line_user_id: str):
-        conn = self._connect()
-        conn.execute(
-            """
-            INSERT INTO users (line_user_id) VALUES (?)
-            ON CONFLICT(line_user_id) DO UPDATE SET updated_at = datetime('now')
-            """,
-            (line_user_id,),
-        )
-        conn.commit()
-        conn.close()
+        conn = _get_connection()
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    """
+                    INSERT INTO users (line_user_id) VALUES (%s)
+                    ON DUPLICATE KEY UPDATE updated_at = CURRENT_TIMESTAMP
+                    """,
+                    (line_user_id,),
+                )
+            conn.commit()
+        finally:
+            conn.close()
 
     def get_user(self, line_user_id: str) -> dict | None:
-        conn = self._connect()
-        row = conn.execute(
-            "SELECT * FROM users WHERE line_user_id = ?", (line_user_id,)
-        ).fetchone()
-        conn.close()
-        return dict(row) if row else None
+        conn = _get_connection()
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    "SELECT * FROM users WHERE line_user_id = %s", (line_user_id,)
+                )
+                return cursor.fetchone()
+        finally:
+            conn.close()
 
     def get_user_by_subscription(self, subscription_id: str) -> dict | None:
-        conn = self._connect()
-        row = conn.execute(
-            "SELECT * FROM users WHERE stripe_subscription_id = ?",
-            (subscription_id,),
-        ).fetchone()
-        conn.close()
-        return dict(row) if row else None
+        conn = _get_connection()
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    "SELECT * FROM users WHERE stripe_subscription_id = %s",
+                    (subscription_id,),
+                )
+                return cursor.fetchone()
+        finally:
+            conn.close()
+
+    def update_birth_date(self, line_user_id: str, birth_date: str):
+        conn = _get_connection()
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    "UPDATE users SET birth_date = %s, onboarding_step = 2 WHERE line_user_id = %s",
+                    (birth_date, line_user_id),
+                )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def update_gender(self, line_user_id: str, gender: str):
+        conn = _get_connection()
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    "UPDATE users SET gender = %s, onboarding_step = 0 WHERE line_user_id = %s",
+                    (gender, line_user_id),
+                )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def set_onboarding_step(self, line_user_id: str, step: int):
+        conn = _get_connection()
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    "UPDATE users SET onboarding_step = %s WHERE line_user_id = %s",
+                    (step, line_user_id),
+                )
+            conn.commit()
+        finally:
+            conn.close()
 
     # ─── 課金管理 ──────────────────────────────────────────
     def upgrade_to_premium(
         self, line_user_id: str, subscription_id: str, customer_id: str
     ):
-        conn = self._connect()
-        conn.execute(
-            """
-            UPDATE users SET
-                is_premium = 1,
-                stripe_subscription_id = ?,
-                stripe_customer_id = ?,
-                updated_at = datetime('now')
-            WHERE line_user_id = ?
-            """,
-            (subscription_id, customer_id, line_user_id),
-        )
-        conn.commit()
-        conn.close()
+        conn = _get_connection()
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    """
+                    UPDATE users SET
+                        is_premium = 1,
+                        stripe_subscription_id = %s,
+                        stripe_customer_id = %s
+                    WHERE line_user_id = %s
+                    """,
+                    (subscription_id, customer_id, line_user_id),
+                )
+            conn.commit()
+        finally:
+            conn.close()
 
     def downgrade_from_premium(self, subscription_id: str):
-        conn = self._connect()
-        conn.execute(
-            """
-            UPDATE users SET
-                is_premium = 0,
-                stripe_subscription_id = NULL,
-                updated_at = datetime('now')
-            WHERE stripe_subscription_id = ?
-            """,
-            (subscription_id,),
-        )
-        conn.commit()
-        conn.close()
+        conn = _get_connection()
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    """
+                    UPDATE users SET
+                        is_premium = 0,
+                        stripe_subscription_id = NULL
+                    WHERE stripe_subscription_id = %s
+                    """,
+                    (subscription_id,),
+                )
+            conn.commit()
+        finally:
+            conn.close()
 
     # ─── 占い履歴 ─────────────────────────────────────────
     def save_reading(
         self, line_user_id: str, cards: list[dict], question: str, reading_text: str
     ):
-        conn = self._connect()
-        conn.execute(
-            """
-            INSERT INTO readings (line_user_id, cards, question, reading_text)
-            VALUES (?, ?, ?, ?)
-            """,
-            (line_user_id, json.dumps(cards, ensure_ascii=False), question, reading_text),
-        )
-        conn.commit()
-        conn.close()
+        conn = _get_connection()
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    """
+                    INSERT INTO readings (line_user_id, cards, question, reading_text)
+                    VALUES (%s, %s, %s, %s)
+                    """,
+                    (line_user_id, json.dumps(cards, ensure_ascii=False), question, reading_text),
+                )
+            conn.commit()
+        finally:
+            conn.close()
 
     def get_today_reading_count(self, line_user_id: str) -> int:
-        conn = self._connect()
-        today = date.today().isoformat()
-        row = conn.execute(
-            """
-            SELECT COUNT(*) as cnt FROM readings
-            WHERE line_user_id = ? AND date(created_at) = ?
-            """,
-            (line_user_id, today),
-        ).fetchone()
-        conn.close()
-        return row["cnt"] if row else 0
+        conn = _get_connection()
+        try:
+            with conn.cursor() as cursor:
+                today = date.today().isoformat()
+                cursor.execute(
+                    """
+                    SELECT COUNT(*) AS cnt FROM readings
+                    WHERE line_user_id = %s AND DATE(created_at) = %s
+                    """,
+                    (line_user_id, today),
+                )
+                row = cursor.fetchone()
+                return row["cnt"] if row else 0
+        finally:
+            conn.close()
 
     def get_total_reading_count(self, line_user_id: str) -> int:
-        conn = self._connect()
-        row = conn.execute(
-            "SELECT COUNT(*) as cnt FROM readings WHERE line_user_id = ?",
-            (line_user_id,),
-        ).fetchone()
-        conn.close()
-        return row["cnt"] if row else 0
+        conn = _get_connection()
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    "SELECT COUNT(*) AS cnt FROM readings WHERE line_user_id = %s",
+                    (line_user_id,),
+                )
+                row = cursor.fetchone()
+                return row["cnt"] if row else 0
+        finally:
+            conn.close()
