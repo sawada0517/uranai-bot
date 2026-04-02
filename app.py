@@ -144,6 +144,11 @@ async def handle_follow(user_id: str, reply_token: str):
     await reply_message(reply_token, [{"type": "text", "text": welcome}])
 
 
+async def handle_unfollow(user_id: str):
+    """友だち解除時の処理（論理削除）"""
+    db.delete_user(user_id)
+
+
 def _parse_birth_date(text: str) -> str | None:
     """生年月日をパースしてYYYY-MM-DD形式で返す。失敗時はNone"""
     text = text.strip()
@@ -451,6 +456,9 @@ async def webhook(request: Request, x_line_signature: str = Header(None)):
 
         if event["type"] == "follow":
             await handle_follow(user_id, reply_token)
+
+        elif event["type"] == "unfollow":
+            await handle_unfollow(user_id)
 
         elif event["type"] == "message":
             msg = event.get("message", {})
