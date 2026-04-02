@@ -71,7 +71,7 @@ def build_system_prompt(level_info: dict) -> str:
     return base + persona + tone + rules
 
 
-def build_tarot_prompt(cards: list[dict], question: str = "") -> str:
+def build_tarot_prompt(cards: list[dict], question: str = "", user_info: dict | None = None) -> str:
     """タロット占いのプロンプトを構築（既存と互換）"""
 
     card_descriptions = []
@@ -100,10 +100,18 @@ def build_tarot_prompt(cards: list[dict], question: str = "") -> str:
     else:
         question_part = "\n相談内容: 今日の総合運勢\n"
 
+    if user_info and user_info.get("birth_date"):
+        user_part = f"\n鑑定相手の情報:\n- 生年月日: {user_info['birth_date']}"
+        if user_info.get("gender"):
+            user_part += f"\n- 性別: {user_info['gender']}"
+        user_part += "\n"
+    else:
+        user_part = ""
+
     prompt = f"""以下のタロットカードで占いを行ってください。
 
 {spread_info}
-
+{user_part}
 引いたカード:
 {cards_text}
 {question_part}
