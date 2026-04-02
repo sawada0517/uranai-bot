@@ -42,7 +42,8 @@ class Database:
                         stripe_customer_id VARCHAR(255),
                         stripe_subscription_id VARCHAR(255),
                         created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                        updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+                        updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                        deleted_at DATETIME NULL DEFAULT NULL
                     ) CHARACTER SET utf8mb4
                 """)
                 cursor.execute("""
