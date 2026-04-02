@@ -74,8 +74,22 @@ class Database:
                 cursor.execute(
                     """
                     INSERT INTO users (line_user_id) VALUES (%s)
-                    ON DUPLICATE KEY UPDATE updated_at = CURRENT_TIMESTAMP
+                    ON DUPLICATE KEY UPDATE
+                        deleted_at = NULL,
+                        updated_at = CURRENT_TIMESTAMP
                     """,
+                    (line_user_id,),
+                )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def delete_user(self, line_user_id: str):
+        conn = _get_connection()
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    "UPDATE users SET deleted_at = CURRENT_TIMESTAMP WHERE line_user_id = %s",
                     (line_user_id,),
                 )
             conn.commit()
