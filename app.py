@@ -92,9 +92,9 @@ async def push_message(user_id: str, messages: list[dict]):
 
 
 # ─── OpenAI でタロット占い生成 ──────────────────────────────
-async def generate_tarot_reading(cards: list[dict], question: str = "") -> str:
+async def generate_tarot_reading(cards: list[dict], question: str = "", user_info: dict | None = None) -> str:
     """OpenAI GPTでタロット占いの結果を生成"""
-    prompt = build_tarot_prompt(cards, question)
+    prompt = build_tarot_prompt(cards, question, user_info)
 
     async with httpx.AsyncClient(timeout=30.0) as client:
         response = await client.post(
@@ -298,7 +298,7 @@ async def handle_tarot_reading(user_id: str, text: str, reply_token: str):
 
     # AI占い結果を生成
     try:
-        reading = await generate_tarot_reading(cards, question)
+        reading = await generate_tarot_reading(cards, question, user_info=user)
     except Exception as e:
         print(f"OpenAI API error: {e}")
         reading = "申し訳ありません、星の巡りが乱れているようです...もう一度お試しください🌟"
