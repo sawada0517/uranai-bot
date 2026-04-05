@@ -138,19 +138,30 @@ async def generate_tarot_reading(
 async def handle_follow(user_id: str, reply_token: str):
     """友だち追加時の処理"""
     db.upsert_user(user_id)
-    welcome = (
-        "🔮 ようこそ！タロット占いボットへ\n\n"
-        "メッセージを送ると、タロットカードがあなたの運勢を占います✨\n\n"
-        "【使い方】\n"
-        '・「占って」→ 今日の総合運勢\n'
-        '・「恋愛占い」→ 恋愛運を占う\n'
-        '・「仕事運」→ 仕事運を占う\n'
-        "・質問を直接入力 → その悩みを占う\n\n"
-        f"🆓 無料プラン：1日{FREE_DAILY_LIMIT}回まで\n"
-        "⭐ プレミアム（月額500円）：無制限＋詳細鑑定\n\n"
-        '「プレミアム」と送ると登録できます💎'
-    )
-    await reply_message(reply_token, [{"type": "text", "text": welcome}])
+
+    arca_image = {
+        "type": "image",
+        "originalContentUrl": "https://sawada3.com/uranai-bot/arca_welcome.png",
+        "previewImageUrl": "https://sawada3.com/uranai-bot/arca_welcome_preview.png",
+    }
+
+    welcome = {
+        "type": "text",
+        "text": (
+            "🔮 Arcanaへようこそ！\n\n"
+            "わたしはアルカ、見習いタロット占い師です✨\n"
+            "あなたと一緒に成長していきたいの！\n\n"
+            "今はまだ「総合運」しか占えないけど、\n"
+            "たくさん占うほど、わたしの力が目覚めて\n"
+            "恋愛運・仕事運・金運…と占えるようになるよ🌟\n\n"
+            "まずは生年月日を教えてね！\n"
+            "（例: 1990/04/28）\n\n"
+            f"🆓 無料：1日{FREE_DAILY_LIMIT}回\n"
+            "⭐ Premium（月額500円）：無制限＋育成加速\n"
+        ),
+    }
+
+    await reply_message(reply_token, [arca_image, welcome])
 
 
 async def handle_unfollow(user_id: str):
@@ -189,14 +200,14 @@ async def handle_text_message(user_id: str, text: str, reply_token: str):
             birth_date = _parse_birth_date(text)
             if not birth_date:
                 await reply_message(reply_token, [{"type": "text", "text": (
-                    "生年月日の形式が正しくありません。\n"
-                    "例：1990/03/15 または 1990-03-15 で入力してください。"
+                    "うーん、うまく読み取れなかった…💦\n"
+                    "1990/03/15 みたいに入力してくれると嬉しいな🌟"
                 )}])
                 return
             db.update_birth_date(user_id, birth_date)
             await reply_message(reply_token, [{
                 "type": "text",
-                "text": "ありがとうございます！\n次に性別を選んでください。",
+                "text": "ありがとう✨ もうひとつだけ教えてね！\n性別を選んでくれる？",
                 "quickReply": {"items": [
                     {"type": "action", "action": {"type": "message", "label": "男性", "text": "男性"}},
                     {"type": "action", "action": {"type": "message", "label": "女性", "text": "女性"}},
@@ -209,7 +220,7 @@ async def handle_text_message(user_id: str, text: str, reply_token: str):
             if text.strip() not in ("男性", "女性", "その他"):
                 await reply_message(reply_token, [{
                     "type": "text",
-                    "text": "下のボタンから性別を選んでください。",
+                    "text": "下のボタンから選んでくれると嬉しいな🌟",
                     "quickReply": {"items": [
                         {"type": "action", "action": {"type": "message", "label": "男性", "text": "男性"}},
                         {"type": "action", "action": {"type": "message", "label": "女性", "text": "女性"}},
@@ -219,7 +230,7 @@ async def handle_text_message(user_id: str, text: str, reply_token: str):
                 return
             db.update_gender(user_id, text.strip())
             await reply_message(reply_token, [{"type": "text", "text": (
-                "登録完了です！\nさっそく占ってみましょう🔮\n\n「占って」と送るか、悩みを入力してください。"
+                "やったー！準備完了だよ🎉\nさっそく占ってみよう✨\n\n「占って」って送ってみてね！"
             )}])
             return
 
@@ -258,9 +269,9 @@ async def handle_tarot_reading(user_id: str, text: str, reply_token: str):
     if not user.get("birth_date"):
         db.set_onboarding_step(user_id, 1)
         await reply_message(reply_token, [{"type": "text", "text": (
-            "占いの前に、少しだけ教えてください🔮\n\n"
-            "生年月日を入力してください。\n"
-            "例：1990/03/15"
+            "占う前にちょっとだけ教えてほしいの🔮\n\n"
+            "あなたの生年月日を教えてね！\n"
+            "（例: 1990/03/15）"
         )}])
         return
 
