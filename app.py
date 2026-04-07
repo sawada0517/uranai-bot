@@ -1,6 +1,7 @@
 """
 🔮 LINE タロット占いボット - メインアプリケーション
 LINE Messaging API + OpenAI GPT + Stripe サブスク課金
+v2: カテゴリヘッダー、ローディングメッセージ、結果後Quick Reply追加
 """
 
 import os
@@ -39,10 +40,9 @@ LINE_CHANNEL_ACCESS_TOKEN = os.getenv("LINE_CHANNEL_ACCESS_TOKEN", "")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY", "")
 STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "")
-STRIPE_PRICE_ID = os.getenv("STRIPE_PRICE_ID", "")  # Stripeで作成した月額プランのPrice ID
-BASE_URL = os.getenv("BASE_URL", "https://your-domain.com")  # デプロイ先URL
+STRIPE_PRICE_ID = os.getenv("STRIPE_PRICE_ID", "")
+BASE_URL = os.getenv("BASE_URL", "https://your-domain.com")
 
-# 無料ユーザーの1日あたりの占い回数制限
 FREE_DAILY_LIMIT = int(os.getenv("FREE_DAILY_LIMIT", "10"))
 
 stripe.api_key = STRIPE_SECRET_KEY
@@ -60,9 +60,28 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="LINE タロット占いボット 🔮", lifespan=lifespan)
 
 
+# ─── カテゴリヘッダー定義 ──────────────────────────────────
+CATEGORY_HEADERS = {
+    "総合運": "🔮 今日の総合運鑑定",
+    "恋愛運": "💕 恋愛運の鑑定",
+    "仕事運": "💼 仕事運の鑑定",
+    "金運": "💰 金運の鑑定",
+    "健康運": "🌿 健康運の鑑定",
+    "自由質問": "🌟 あなたの相談への鑑定",
+}
+
+# ─── ローディングメッセージのバリエーション ──────────────
+LOADING_MESSAGES = [
+    "アルカが星を読んでいるよ…✨\n少し待っててね🌙",
+    "カードたちがざわめいてる…🔮\nあなたの運命が見えてくるよ✨",
+    "星々があなたを照らし始めたよ🌟\nもうちょっと待ってね…",
+    "うーん…見えてきた…！🔮\nアルカが解読中だよ✨",
+    "宇宙からのメッセージが届いてる…🌙\nもう少しで読み解けるよ✨",
+]
+
+
 # ─── LINE 署名検証 ─────────────────────────────────────────
 def verify_signature(body: bytes, signature: str) -> bool:
-    """LINE Webhookの署名を検証"""
     hash_value = hmac.new(
         LINE_CHANNEL_SECRET.encode("utf-8"), body, hashlib.sha256
     ).digest()
@@ -72,7 +91,6 @@ def verify_signature(body: bytes, signature: str) -> bool:
 
 # ─── LINE メッセージ送信 ────────────────────────────────────
 async def reply_message(reply_token: str, messages: list[dict]):
-    """LINEにリプライメッセージを送信"""
     async with httpx.AsyncClient() as client:
         await client.post(
             "https://api.line.me/v2/bot/message/reply",
@@ -85,7 +103,6 @@ async def reply_message(reply_token: str, messages: list[dict]):
 
 
 async def push_message(user_id: str, messages: list[dict]):
-    """LINEにプッシュメッセージを送信"""
     async with httpx.AsyncClient() as client:
         await client.post(
             "https://api.line.me/v2/bot/message/push",
@@ -97,6 +114,32 @@ async def push_message(user_id: str, messages: list[dict]):
         )
 
 
+# ─── 占い後のQuick Reply ────────────────────────────────────
+def build_after_reading_quick_reply(level_info: dict, is_premium: bool) -> dict:
+    """占い結果の後に表示するQuick Reply"""
+    items = [
+        {"type": "action", "action": {"type": "message", "label": "🔮 もう一度占う", "text": "占って"}},
+    ]
+
+    # アンロックされているカテゴリだけ表示
+    level = level_info["level"]
+    if level >= 2:
+        items.append({"type": "action", "action": {"type": "message", "label": "💕 恋愛運", "text": "恋愛運"}})
+    if level >= 3:
+        items.append({"type": "action", "action": {"type": "message", "label": "💼 仕事運", "text": "仕事運"}})
+    if level >= 4:
+        items.append({"type": "action", "action": {"type": "message", "label": "💰 金運", "text": "金運"}})
+    if level >= 5:
+        items.append({"type": "action", "action": {"type": "message", "label": "🌿 健康運", "text": "健康運"}})
+
+    items.append({"type": "action", "action": {"type": "message", "label": "📊 ステータス", "text": "ステータス"}})
+
+    if not is_premium:
+        items.append({"type": "action", "action": {"type": "message", "label": "⭐ Premium", "text": "プレミアム"}})
+
+    return {"items": items[:13]}  # LINEの上限は13個
+
+
 # ─── OpenAI でタロット占い生成 ──────────────────────────────
 async def generate_tarot_reading(
     cards: list[dict],
@@ -104,13 +147,10 @@ async def generate_tarot_reading(
     user_info: dict | None = None,
     level_info: dict | None = None,
 ) -> str:
-    """OpenAI GPTでタロット占いの結果を生成"""
     prompt = build_tarot_prompt(cards, question, user_info)
     system_prompt = build_system_prompt(level_info) if level_info else (
         "あなたは神秘的で温かみのあるタロット占い師です。"
-        "日本語で占い結果を伝えてください。"
-        "絵文字を適度に使い、親しみやすく、でも神秘的な雰囲気を保ってください。"
-        "結果は400文字以内に収めてください。"
+        "日本語で具体的で行動可能な占い結果を伝えてください。"
     )
 
     async with httpx.AsyncClient(timeout=30.0) as client:
@@ -126,7 +166,7 @@ async def generate_tarot_reading(
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": prompt},
                 ],
-                "max_tokens": 600,
+                "max_tokens": 800,
                 "temperature": 0.9,
             },
         )
@@ -136,7 +176,6 @@ async def generate_tarot_reading(
 
 # ─── メッセージハンドラ ────────────────────────────────────
 async def handle_follow(user_id: str, reply_token: str):
-    """友だち追加時の処理"""
     db.upsert_user(user_id)
 
     arca_image = {
@@ -155,9 +194,9 @@ async def handle_follow(user_id: str, reply_token: str):
             "たくさん占うほど、わたしの力が目覚めて\n"
             "恋愛運・仕事運・金運…と占えるようになるよ🌟\n\n"
             "まずは生年月日を教えてね！\n"
-            "（例: 1990/04/28）\n\n"
+            "(例: 1990/04/28)\n\n"
             f"🆓 無料：1日{FREE_DAILY_LIMIT}回\n"
-            "⭐ Premium（月額500円）：無制限＋育成加速\n"
+            "⭐ Premium(月額500円)：無制限＋育成加速\n"
         ),
     }
 
@@ -165,12 +204,10 @@ async def handle_follow(user_id: str, reply_token: str):
 
 
 async def handle_unfollow(user_id: str):
-    """友だち解除時の処理（論理削除）"""
     db.delete_user(user_id)
 
 
 def _parse_birth_date(text: str) -> str | None:
-    """生年月日をパースしてYYYY-MM-DD形式で返す。失敗時はNone"""
     text = text.strip()
     patterns = [
         r"(\d{4})[/\-年](\d{1,2})[/\-月](\d{1,2})",
@@ -188,10 +225,9 @@ def _parse_birth_date(text: str) -> str | None:
 
 
 async def handle_text_message(user_id: str, text: str, reply_token: str):
-    """テキストメッセージの処理"""
     text_lower = text.strip().lower()
 
-    # ── オンボーディング（生年月日・性別の収集）──
+    # ── オンボーディング ──
     user = db.get_user(user_id)
     if user:
         step = user.get("onboarding_step", 0)
@@ -229,49 +265,47 @@ async def handle_text_message(user_id: str, text: str, reply_token: str):
                 }])
                 return
             db.update_gender(user_id, text.strip())
-            await reply_message(reply_token, [{"type": "text", "text": (
-                "やったー！準備完了だよ🎉\nさっそく占ってみよう✨\n\n「占って」って送ってみてね！"
-            )}])
+            await reply_message(reply_token, [{
+                "type": "text",
+                "text": "やったー！準備完了だよ🎉\nさっそく占ってみよう✨\n\n下のボタンから選んでみてね！",
+                "quickReply": {"items": [
+                    {"type": "action", "action": {"type": "message", "label": "🔮 占って", "text": "占って"}},
+                ]},
+            }])
             return
 
-    # ── プレミアム登録 ──
     if text_lower in ("プレミアム", "premium", "サブスク", "課金", "登録"):
         await handle_premium_request(user_id, reply_token)
         return
 
-    # ── 利用状況確認 ──
     if text_lower in ("状況", "ステータス", "status", "マイページ"):
         await handle_status(user_id, reply_token)
         return
 
-    # ── 解約 ──
     if text_lower in ("解約", "退会", "キャンセル", "cancel"):
         await handle_cancel(user_id, reply_token)
         return
 
-    # ── ヘルプ ──
     if text_lower in ("ヘルプ", "help", "使い方"):
         await handle_help(reply_token)
         return
 
-    # ── タロット占い ──
     await handle_tarot_reading(user_id, text, reply_token)
 
 
 async def handle_tarot_reading(user_id: str, text: str, reply_token: str):
-    """タロット占いを実行"""
     user = db.get_user(user_id)
     if not user:
         db.upsert_user(user_id)
         user = db.get_user(user_id)
 
-    # ── 初回：生年月日が未登録ならオンボーディング開始 ──
+    # ── 初回：オンボーディング ──
     if not user.get("birth_date"):
         db.set_onboarding_step(user_id, 1)
         await reply_message(reply_token, [{"type": "text", "text": (
             "占う前にちょっとだけ教えてほしいの🔮\n\n"
             "あなたの生年月日を教えてね！\n"
-            "（例: 1990/03/15）"
+            "(例: 1990/03/15)"
         )}])
         return
 
@@ -295,13 +329,17 @@ async def handle_tarot_reading(user_id: str, text: str, reply_token: str):
     # カテゴリ判定
     category = detect_category(text)
 
-    # カテゴリロックチェック（自由質問はロックなし）
+    # カテゴリロックチェック
     if category != "自由質問" and not is_category_unlocked(total_before, category):
         lock_msg = build_lock_message(category, total_before, is_premium)
         await reply_message(reply_token, [{"type": "text", "text": lock_msg}])
         return
 
-    # カードを引く（プレミアムは3枚展開、無料は1枚）
+    # ✨ ローディングメッセージを先に送信（reply_messageで）
+    loading_text = random.choice(LOADING_MESSAGES)
+    await reply_message(reply_token, [{"type": "text", "text": loading_text}])
+
+    # カードを引く
     num_cards = 3 if is_premium else 1
     cards = draw_cards(num_cards)
 
@@ -325,19 +363,27 @@ async def handle_tarot_reading(user_id: str, text: str, reply_token: str):
     db.save_reading(user_id, cards, question, reading)
     total_after = db.get_total_reading_count(user_id)
 
-    # 結果フッター
+    # ✨ カテゴリヘッダー + 鑑定結果
+    header = CATEGORY_HEADERS.get(category, "🔮 鑑定結果")
     today_remaining = FREE_DAILY_LIMIT - db.get_today_reading_count(user_id) if not is_premium else 0
     footer = build_reading_footer(total_after, is_premium, today_remaining)
-    reading_text = f"🔮 鑑定結果\n\n{reading}\n\n{footer}"
+    reading_text = f"{header}\n\n{reading}\n\n{footer}"
 
-    # Flex Message + テキスト送信
+    # Flex Message + テキスト送信（push_messageで）
     if num_cards == 1:
         flex_msg = build_card_flex_message(cards[0])
     else:
         flex_msg = build_spread_flex_message(cards)
 
-    messages = [flex_msg, {"type": "text", "text": reading_text}]
-    await reply_message(reply_token, messages)
+    # ✨ Quick Reply付きの結果メッセージ
+    text_msg = {
+        "type": "text",
+        "text": reading_text,
+        "quickReply": build_after_reading_quick_reply(get_level_info(total_after), is_premium),
+    }
+
+    # ローディング後はpush_messageで送信
+    await push_message(user_id, [flex_msg, text_msg])
 
     # レベルアップ通知
     levelup_msg = build_levelup_message(total_before, total_after)
@@ -346,7 +392,6 @@ async def handle_tarot_reading(user_id: str, text: str, reply_token: str):
 
 
 async def handle_premium_request(user_id: str, reply_token: str):
-    """プレミアム登録リクエスト"""
     user = db.get_user(user_id)
 
     if user and user["is_premium"]:
@@ -356,7 +401,6 @@ async def handle_premium_request(user_id: str, reply_token: str):
         )
         return
 
-    # Stripe Checkout セッションURL を生成
     checkout_url = f"{BASE_URL}/checkout?user_id={user_id}"
 
     msg = {
@@ -384,7 +428,6 @@ async def handle_premium_request(user_id: str, reply_token: str):
 
 
 async def handle_status(user_id: str, reply_token: str):
-    """ユーザーステータス表示"""
     user = db.get_user(user_id)
     if not user:
         db.upsert_user(user_id)
@@ -399,7 +442,6 @@ async def handle_status(user_id: str, reply_token: str):
 
 
 async def handle_cancel(user_id: str, reply_token: str):
-    """サブスク解約"""
     user = db.get_user(user_id)
 
     if not user or not user["is_premium"]:
@@ -409,7 +451,6 @@ async def handle_cancel(user_id: str, reply_token: str):
         )
         return
 
-    # Stripeサブスクリプションをキャンセル
     if user.get("stripe_subscription_id"):
         try:
             stripe.Subscription.modify(
@@ -430,7 +471,6 @@ async def handle_cancel(user_id: str, reply_token: str):
 
 
 async def handle_help(reply_token: str):
-    """ヘルプメッセージ"""
     help_msg = (
         "📖 使い方ガイド\n\n"
         "【占いコマンド】\n"
@@ -451,10 +491,8 @@ async def handle_help(reply_token: str):
 # ─── LINE Webhook エンドポイント ─────────────────────────────
 @app.post("/webhook")
 async def webhook(request: Request, x_line_signature: str = Header(None)):
-    """LINE Webhook受信"""
     body = await request.body()
 
-    # 署名検証
     if x_line_signature and LINE_CHANNEL_SECRET:
         if not verify_signature(body, x_line_signature):
             raise HTTPException(status_code=400, detail="Invalid signature")
@@ -482,7 +520,6 @@ async def webhook(request: Request, x_line_signature: str = Header(None)):
 # ─── Stripe Checkout ─────────────────────────────────────────
 @app.get("/checkout")
 async def checkout(user_id: str):
-    """Stripe Checkoutセッション作成 → リダイレクト"""
     try:
         session = stripe.checkout.Session.create(
             payment_method_types=["card"],
@@ -502,7 +539,6 @@ async def checkout(user_id: str):
 
 @app.get("/checkout/success")
 async def checkout_success():
-    """決済成功ページ"""
     return JSONResponse(
         content={
             "message": "✅ プレミアム登録が完了しました！LINEに戻って占いをお楽しみください 🔮✨"
@@ -512,14 +548,12 @@ async def checkout_success():
 
 @app.get("/checkout/cancel")
 async def checkout_cancel():
-    """決済キャンセルページ"""
     return JSONResponse(content={"message": "決済がキャンセルされました。LINEに戻ってお試しください。"})
 
 
 # ─── Stripe Webhook ──────────────────────────────────────────
 @app.post("/stripe/webhook")
 async def stripe_webhook(request: Request):
-    """Stripe Webhook受信 - 課金状態の更新"""
     payload = await request.body()
     sig_header = request.headers.get("stripe-signature")
 
@@ -530,7 +564,6 @@ async def stripe_webhook(request: Request):
     except (ValueError, stripe.error.SignatureVerificationError):
         raise HTTPException(status_code=400, detail="Invalid webhook")
 
-    # チェックアウト完了
     if event["type"] == "checkout.session.completed":
         session = event["data"]["object"]
         line_user_id = session.get("metadata", {}).get("line_user_id")
@@ -554,13 +587,11 @@ async def stripe_webhook(request: Request):
                 ],
             )
 
-    # サブスクリプション削除（期間終了）
     elif event["type"] == "customer.subscription.deleted":
         subscription = event["data"]["object"]
         subscription_id = subscription["id"]
         db.downgrade_from_premium(subscription_id)
 
-    # 支払い失敗
     elif event["type"] == "invoice.payment_failed":
         invoice = event["data"]["object"]
         subscription_id = invoice.get("subscription")
