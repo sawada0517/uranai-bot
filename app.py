@@ -178,10 +178,10 @@ async def generate_tarot_reading(
 async def handle_follow(user_id: str, reply_token: str):
     db.upsert_user(user_id)
 
-    arca_image = {
-        "type": "image",
-        "originalContentUrl": "https://sawada3.com/uranai-bot/arca_welcome.png",
-        "previewImageUrl": "https://sawada3.com/uranai-bot/arca_welcome_preview.png",
+    arca_video = {
+        "type": "video",
+        "originalContentUrl": "https://sawada3.com/uranai-bot/onboarding.mp4",
+        "previewImageUrl": "https://sawada3.com/uranai-bot/onboarding_thumb.jpg",
     }
 
     welcome = {
@@ -200,7 +200,7 @@ async def handle_follow(user_id: str, reply_token: str):
         ),
     }
 
-    await reply_message(reply_token, [arca_image, welcome])
+    await reply_message(reply_token, [arca_video, welcome])
 
 
 async def handle_unfollow(user_id: str):
