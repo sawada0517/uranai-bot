@@ -146,8 +146,13 @@ async def generate_tarot_reading(
     question: str = "",
     user_info: dict | None = None,
     level_info: dict | None = None,
+    drill_down: dict | None = None,
+    last_feedback: str | None = None,
+    # TODO(engineer): drill_downはDBから取得した深掘り情報を渡してください
+    # TODO(engineer): last_feedbackはDBから取得した前回フィードバック値を渡してください
+    # 値は "good" / "maybe" / "miss" のいずれか
 ) -> str:
-    prompt = build_tarot_prompt(cards, question, user_info)
+    prompt = build_tarot_prompt(cards, question, user_info, drill_down, last_feedback)
     system_prompt = build_system_prompt(level_info) if level_info else (
         "あなたは神秘的で温かみのあるタロット占い師です。"
         "日本語で具体的で行動可能な占い結果を伝えてください。"
@@ -190,9 +195,8 @@ async def handle_follow(user_id: str, reply_token: str):
             "🔮 Arcanaへようこそ！\n\n"
             "わたしはアルカ、見習いタロット占い師です✨\n"
             "あなたと一緒に成長していきたいの！\n\n"
-            "今はまだ「総合運」しか占えないけど、\n"
-            "たくさん占うほど、わたしの力が目覚めて\n"
-            "恋愛運・仕事運・金運…と占えるようになるよ🌟\n\n"
+            "占えば占うほどアルカの力が目覚めて、\n"
+            "鑑定の精度がどんどん上がっていくよ🌟\n\n"
             "まずは生年月日を教えてね！\n"
             "(例: 1990/04/28)\n\n"
             f"🆓 無料：1日{FREE_DAILY_LIMIT}回\n"
@@ -265,13 +269,37 @@ async def handle_text_message(user_id: str, text: str, reply_token: str):
                 }])
                 return
             db.update_gender(user_id, text.strip())
+            db.set_onboarding_step(user_id, 3)
             await reply_message(reply_token, [{
                 "type": "text",
-                "text": "やったー！準備完了だよ🎉\nさっそく占ってみよう✨\n\n下のボタンから選んでみてね！",
+                "text": "ありがとう✨ もうひとつだけ！\nどのジャンルから占い始める？🌟\n\n占えば占うほどアルカの精度が上がっていくよ✨",
                 "quickReply": {"items": [
-                    {"type": "action", "action": {"type": "message", "label": "🔮 占って", "text": "占って"}},
+                    {"type": "action", "action": {"type": "message", "label": "💕 恋愛運", "text": "恋愛運"}},
+                    {"type": "action", "action": {"type": "message", "label": "💼 仕事運", "text": "仕事運"}},
+                    {"type": "action", "action": {"type": "message", "label": "💰 金運", "text": "金運"}},
+                    {"type": "action", "action": {"type": "message", "label": "🌿 健康運", "text": "健康運"}},
+                    {"type": "action", "action": {"type": "message", "label": "🔮 総合運", "text": "占って"}},
                 ]},
             }])
+            return
+
+        if step == 3:
+            valid_categories = ("恋愛運", "仕事運", "金運", "健康運", "占って")
+            if text.strip() not in valid_categories:
+                await reply_message(reply_token, [{
+                    "type": "text",
+                    "text": "下のボタンから選んでくれると嬉しいな🌟",
+                    "quickReply": {"items": [
+                        {"type": "action", "action": {"type": "message", "label": "💕 恋愛運", "text": "恋愛運"}},
+                        {"type": "action", "action": {"type": "message", "label": "💼 仕事運", "text": "仕事運"}},
+                        {"type": "action", "action": {"type": "message", "label": "💰 金運", "text": "金運"}},
+                        {"type": "action", "action": {"type": "message", "label": "🌿 健康運", "text": "健康運"}},
+                        {"type": "action", "action": {"type": "message", "label": "🔮 総合運", "text": "占って"}},
+                    ]},
+                }])
+                return
+            db.set_onboarding_step(user_id, 0)
+            await handle_tarot_reading(user_id, text.strip(), reply_token)
             return
 
     if text_lower in ("プレミアム", "premium", "サブスク", "課金", "登録"):
@@ -290,6 +318,26 @@ async def handle_text_message(user_id: str, text: str, reply_token: str):
         await handle_help(reply_token)
         return
 
+    if text_lower in ("通知オン", "通知on"):
+        # TODO(engineer): db.set_morning_notify(user_id, True) を実装してください
+        # usersテーブルに morning_notify boolean カラムを追加（デフォルトFalse）
+        await reply_message(reply_token, [{"type": "text", "text": (
+            "やったー！🌟\n"
+            "毎朝7時にアルカから星座占いを\n"
+            "お届けするね✨\n\n"
+            "変更したいときは「通知オフ」と送ってね"
+        )}])
+        return
+
+    if text_lower in ("通知オフ", "通知off"):
+        # TODO(engineer): db.set_morning_notify(user_id, False) を実装してください
+        await reply_message(reply_token, [{"type": "text", "text": (
+            "わかった、お知らせしないようにするね🌙\n\n"
+            "また受け取りたくなったら\n"
+            "「通知オン」と送ってね✨"
+        )}])
+        return
+
     await handle_tarot_reading(user_id, text, reply_token)
 
 
@@ -298,6 +346,26 @@ async def handle_tarot_reading(user_id: str, text: str, reply_token: str):
     if not user:
         db.upsert_user(user_id)
         user = db.get_user(user_id)
+
+    # ── フィードバック確認（次回占う前に前回の評価を聞く）──
+    # TODO(engineer): db.get_pending_feedback(user_id) を実装してください
+    # 戻り値: {"reading_id": str, "pending": bool} | None
+    # pending=Trueの場合、以下のQuick Replyを表示してからreturnしてください
+    #
+    # await reply_message(reply_token, [{
+    #     "type": "text",
+    #     "text": "前回の占い、どうだった？🌙\nアルカ、気になってたんだ✨",
+    #     "quickReply": {"items": [
+    #         {"type": "action", "action": {"type": "message", "label": "✨ すごく当たってた", "text": "feedback_good"}},
+    #         {"type": "action", "action": {"type": "message", "label": "🌙 なんとなく当たってた", "text": "feedback_maybe"}},
+    #         {"type": "action", "action": {"type": "message", "label": "🌀 ちょっと違ったかも", "text": "feedback_miss"}},
+    #     ]},
+    # }])
+    # return
+    #
+    # フィードバック受信時（text が "feedback_good/maybe/miss" の場合）:
+    # db.save_feedback(user_id, reading_id, feedback_value) を実装してください
+    # 保存後: last_feedback をgenerate_tarot_reading()に渡してください
 
     # ── 初回：オンボーディング ──
     if not user.get("birth_date"):
@@ -389,6 +457,22 @@ async def handle_tarot_reading(user_id: str, text: str, reply_token: str):
     levelup_msg = build_levelup_message(total_before, total_after)
     if levelup_msg:
         await push_message(user_id, [{"type": "text", "text": levelup_msg}])
+
+    # ── 初回占い完了後：朝の星座通知オプトイン ──
+    if total_after == 1:
+        await push_message(user_id, [{
+            "type": "text",
+            "text": (
+                "ねえねえ、ひとつ聞いてもいい？🌙\n\n"
+                "毎朝7時に今日の星座占いを\n"
+                "アルカからお届けすることができるんだけど…\n"
+                "受け取る？✨"
+            ),
+            "quickReply": {"items": [
+                {"type": "action", "action": {"type": "message", "label": "✅ 受け取る", "text": "通知オン"}},
+                {"type": "action", "action": {"type": "message", "label": "🙅 いらない", "text": "通知オフ"}},
+            ]},
+        }])
 
 
 async def handle_premium_request(user_id: str, reply_token: str):
@@ -484,6 +568,9 @@ async def handle_help(reply_token: str):
         '📊「ステータス」→ 利用状況\n'
         '⭐「プレミアム」→ 有料プラン案内\n'
         '❌「解約」→ サブスク解約\n'
+        '\n【通知設定】\n'
+        '🌅「通知オン」→ 毎朝7時の星座占いを受け取る\n'
+        '🔕「通知オフ」→ 朝の通知を止める\n'
     )
     await reply_message(reply_token, [{"type": "text", "text": help_msg}])
 

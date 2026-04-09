@@ -52,8 +52,13 @@ def get_zodiac(birth_date_str: str) -> dict | None:
         for sign in ZODIAC_SIGNS:
             s_m, s_d = sign["start"]
             e_m, e_d = sign["end"]
-            if (month == s_m and day >= s_d) or (month == e_m and day <= e_d):
-                return sign
+            if s_m == e_m:
+                # 開始月と終了月が同じ場合（山羊座1/1-1/19など）
+                if month == s_m and s_d <= day <= e_d:
+                    return sign
+            else:
+                if (month == s_m and day >= s_d) or (month == e_m and day <= e_d):
+                    return sign
         return None
     except Exception:
         return None
@@ -111,7 +116,7 @@ def build_system_prompt(level_info: dict) -> str:
     persona = f"現在のあなたの称号は「{title}」（Lv.{level}）です。\n\n"
 
     tone_map = {
-        1: "まだ修行中なので、占い結果に少し自信がない様子を交えつつも、しっかりと深い洞察を伝えてください。「えっと…見えてきたよ」「たぶんだけど…これは確かだと思う」のような表現で。\n",
+        1: "まだ修行中の見習いらしく、ドキドキしながらも一生懸命伝える口調で話してください。「はじめてだからドキドキだけど、これははっきり見えてきた！」「精一杯読んだよ！」のような表現で。鑑定内容自体は具体的・的確に伝えること。\n",
         2: "恋愛の星が読めるようになって嬉しそうに話してください。少し照れながらも、的確で具体的なアドバイスを心がけて。\n",
         3: "自信がついてきた口調で話してください。「見えてきたよ！」「このカードはね…」のような表現で、具体的なアドバイスを伝えて。\n",
         4: "落ち着きのある知的な語り口で話してください。深い洞察を示し、「カードが示しているのは…」のような表現で。\n",
@@ -140,7 +145,7 @@ def build_system_prompt(level_info: dict) -> str:
 
 
 # ─── タロットプロンプト ────────────────────────────────────
-def build_tarot_prompt(cards: list[dict], question: str = "", user_info: dict | None = None) -> str:
+def build_tarot_prompt(cards: list[dict], question: str = "", user_info: dict | None = None, drill_down: dict | None = None, last_feedback: str | None = None) -> str:
     """タロット占いのプロンプトを構築（鑑定の質を強化）"""
 
     card_descriptions = []
@@ -191,10 +196,31 @@ def build_tarot_prompt(cards: list[dict], question: str = "", user_info: dict | 
 
         user_part += "\n"
 
+    # ── 深掘り情報（相手名・悩みの種類・状況）──
+    if drill_down:
+        user_part += "\n【深掘り情報】\n"
+        if drill_down.get("concern"):
+            user_part += f"- 悩みの種類: {drill_down['concern']}\n"
+        if drill_down.get("partner_name"):
+            user_part += f"- お相手の名前: {drill_down['partner_name']}\n"
+        if drill_down.get("relationship"):
+            user_part += f"- 現在の関係: {drill_down['relationship']}\n"
+        if drill_down.get("situation"):
+            user_part += f"- 現在の状況: {drill_down['situation']}\n"
+
+    # ── 前回フィードバック（精度改善ヒント）──
+    feedback_hint = ""
+    if last_feedback == "good":
+        feedback_hint = "\n【前回フィードバック】前回の鑑定は「すごく当たってた」と好評でした。同じトーン・深さで鑑定してください。\n"
+    elif last_feedback == "maybe":
+        feedback_hint = "\n【前回フィードバック】前回は「なんとなく当たってた」との評価でした。より具体的・個別的な内容を心がけてください。\n"
+    elif last_feedback == "miss":
+        feedback_hint = "\n【前回フィードバック】前回は「ちょっと違ったかも」との評価でした。星座・運命数・状況をより丁寧に結びつけ、アドバイスをより具体的にしてください。\n"
+
     prompt = f"""以下のタロットカードで占いを行ってください。
 
 {spread_info}
-{user_part}
+{user_part}{feedback_hint}
 引いたカード:
 {cards_text}
 {question_part}
