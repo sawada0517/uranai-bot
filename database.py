@@ -44,6 +44,7 @@ class Database:
                         birth_date DATE NULL DEFAULT NULL,
                         gender VARCHAR(10) NULL DEFAULT NULL,
                         onboarding_step TINYINT NOT NULL DEFAULT 0,
+                        morning_notify TINYINT(1) NOT NULL DEFAULT 0,
                         created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
                         updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
                         deleted_at DATETIME NULL DEFAULT NULL
@@ -138,6 +139,18 @@ class Database:
                 cursor.execute(
                     "UPDATE users SET gender = %s, onboarding_step = 0 WHERE line_user_id = %s",
                     (gender, line_user_id),
+                )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def set_morning_notify(self, line_user_id: str, enabled: bool):
+        conn = _get_connection()
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    "UPDATE users SET morning_notify = %s WHERE line_user_id = %s",
+                    (1 if enabled else 0, line_user_id),
                 )
             conn.commit()
         finally:
