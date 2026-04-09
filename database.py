@@ -157,6 +157,22 @@ class Database:
         finally:
             conn.close()
 
+    def get_morning_notify_users(self) -> list[dict]:
+        """朝の通知が有効なユーザー一覧を返す"""
+        conn = _get_connection()
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    """
+                    SELECT line_user_id, birth_date, gender
+                    FROM users
+                    WHERE morning_notify = 1 AND deleted_at IS NULL
+                    """
+                )
+                return cursor.fetchall()
+        finally:
+            conn.close()
+
     def set_onboarding_step(self, line_user_id: str, step: int):
         conn = _get_connection()
         try:
