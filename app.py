@@ -319,8 +319,7 @@ async def handle_text_message(user_id: str, text: str, reply_token: str):
         return
 
     if text_lower in ("通知オン", "通知on"):
-        # TODO(engineer): db.set_morning_notify(user_id, True) を実装してください
-        # usersテーブルに morning_notify boolean カラムを追加（デフォルトFalse）
+        db.set_morning_notify(user_id, True)
         await reply_message(reply_token, [{"type": "text", "text": (
             "やったー！🌟\n"
             "毎朝7時にアルカから星座占いを\n"
@@ -330,7 +329,7 @@ async def handle_text_message(user_id: str, text: str, reply_token: str):
         return
 
     if text_lower in ("通知オフ", "通知off"):
-        # TODO(engineer): db.set_morning_notify(user_id, False) を実装してください
+        db.set_morning_notify(user_id, False)
         await reply_message(reply_token, [{"type": "text", "text": (
             "わかった、お知らせしないようにするね🌙\n\n"
             "また受け取りたくなったら\n"
