@@ -302,6 +302,21 @@ async def handle_text_message(user_id: str, text: str, reply_token: str):
             await handle_tarot_reading(user_id, text.strip(), reply_token)
             return
 
+    # ── フィードバック受信 ──
+    if text_lower in ("feedback_good", "feedback_maybe", "feedback_miss"):
+        feedback_map = {"feedback_good": "good", "feedback_maybe": "maybe", "feedback_miss": "miss"}
+        feedback_value = feedback_map[text_lower]
+        pending = db.get_pending_feedback(user_id)
+        if pending:
+            db.save_feedback(user_id, pending["reading_id"], feedback_value)
+        reaction = {
+            "good": "よかった！アルカも嬉しい✨\nこれからもっと精度上げていくね🔮",
+            "maybe": "なるほど…！参考にして精進するね🌙\nまた占ってみて✨",
+            "miss": "ごめんね…💦 もっと頑張る！\n次はもっと当てるから、また占ってね🔮",
+        }
+        await reply_message(reply_token, [{"type": "text", "text": reaction[feedback_value]}])
+        return
+
     if text_lower in ("プレミアム", "premium", "サブスク", "課金", "登録"):
         await handle_premium_request(user_id, reply_token)
         return
@@ -347,24 +362,18 @@ async def handle_tarot_reading(user_id: str, text: str, reply_token: str):
         user = db.get_user(user_id)
 
     # ── フィードバック確認（次回占う前に前回の評価を聞く）──
-    # TODO(engineer): db.get_pending_feedback(user_id) を実装してください
-    # 戻り値: {"reading_id": str, "pending": bool} | None
-    # pending=Trueの場合、以下のQuick Replyを表示してからreturnしてください
-    #
-    # await reply_message(reply_token, [{
-    #     "type": "text",
-    #     "text": "前回の占い、どうだった？🌙\nアルカ、気になってたんだ✨",
-    #     "quickReply": {"items": [
-    #         {"type": "action", "action": {"type": "message", "label": "✨ すごく当たってた", "text": "feedback_good"}},
-    #         {"type": "action", "action": {"type": "message", "label": "🌙 なんとなく当たってた", "text": "feedback_maybe"}},
-    #         {"type": "action", "action": {"type": "message", "label": "🌀 ちょっと違ったかも", "text": "feedback_miss"}},
-    #     ]},
-    # }])
-    # return
-    #
-    # フィードバック受信時（text が "feedback_good/maybe/miss" の場合）:
-    # db.save_feedback(user_id, reading_id, feedback_value) を実装してください
-    # 保存後: last_feedback をgenerate_tarot_reading()に渡してください
+    pending = db.get_pending_feedback(user_id)
+    if pending:
+        await reply_message(reply_token, [{
+            "type": "text",
+            "text": "前回の占い、どうだった？🌙\nアルカ、気になってたんだ✨",
+            "quickReply": {"items": [
+                {"type": "action", "action": {"type": "message", "label": "✨ すごく当たってた", "text": "feedback_good"}},
+                {"type": "action", "action": {"type": "message", "label": "🌙 なんとなく当たってた", "text": "feedback_maybe"}},
+                {"type": "action", "action": {"type": "message", "label": "🌀 ちょっと違ったかも", "text": "feedback_miss"}},
+            ]},
+        }])
+        return
 
     # ── 初回：オンボーディング ──
     if not user.get("birth_date"):
@@ -419,9 +428,13 @@ async def handle_tarot_reading(user_id: str, text: str, reply_token: str):
     else:
         question = CATEGORY_MAP[category]["question"]
 
+    # 前回フィードバックを取得（占い生成に反映）
+    last_reading = db.get_last_reading_with_feedback(user_id)
+    last_feedback = last_reading["feedback"] if last_reading else None
+
     # AI占い結果を生成
     try:
-        reading = await generate_tarot_reading(cards, question, user_info=user, level_info=level_info)
+        reading = await generate_tarot_reading(cards, question, user_info=user, level_info=level_info, last_feedback=last_feedback)
     except Exception as e:
         print(f"OpenAI API error: {e}")
         reading = "申し訳ありません、星の巡りが乱れているようです...もう一度お試しください🌟"

@@ -57,6 +57,7 @@ class Database:
                         cards JSON NOT NULL,
                         question TEXT NULL,
                         reading_text TEXT NOT NULL,
+                        feedback VARCHAR(10) NULL DEFAULT NULL,
                         created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
                         INDEX idx_readings_user_date (line_user_id, created_at),
                         FOREIGN KEY (line_user_id) REFERENCES users(line_user_id)
@@ -221,6 +222,61 @@ class Database:
                     (line_user_id, json.dumps(cards, ensure_ascii=False), question, reading_text),
                 )
             conn.commit()
+        finally:
+            conn.close()
+
+    def get_pending_feedback(self, line_user_id: str) -> dict | None:
+        """最新のreadingでfeedbackが未取得ならそのreadingを返す。なければNone"""
+        conn = _get_connection()
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    """
+                    SELECT id, reading_text FROM readings
+                    WHERE line_user_id = %s AND feedback IS NULL
+                    ORDER BY created_at DESC
+                    LIMIT 1
+                    """,
+                    (line_user_id,),
+                )
+                row = cursor.fetchone()
+                if row:
+                    return {"reading_id": row["id"], "pending": True}
+                return None
+        finally:
+            conn.close()
+
+    def save_feedback(self, line_user_id: str, reading_id: int, feedback_value: str):
+        """feedbackを保存する。feedback_valueは 'good' / 'maybe' / 'miss' のいずれか"""
+        conn = _get_connection()
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    """
+                    UPDATE readings SET feedback = %s
+                    WHERE id = %s AND line_user_id = %s
+                    """,
+                    (feedback_value, reading_id, line_user_id),
+                )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def get_last_reading_with_feedback(self, line_user_id: str) -> dict | None:
+        """feedbackが記録された最新のreadingを返す"""
+        conn = _get_connection()
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    """
+                    SELECT feedback FROM readings
+                    WHERE line_user_id = %s AND feedback IS NOT NULL
+                    ORDER BY created_at DESC
+                    LIMIT 1
+                    """,
+                    (line_user_id,),
+                )
+                return cursor.fetchone()
         finally:
             conn.close()
 
