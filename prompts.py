@@ -38,6 +38,8 @@ ZODIAC_SIGNS = [
 
 
 def get_zodiac(birth_date_str: str) -> dict | None:
+    if not birth_date_str:
+        return None
     try:
         for fmt in ("%Y-%m-%d", "%Y/%m/%d", "%Y%m%d"):
             try:
@@ -81,6 +83,8 @@ DESTINY_NUMBERS = {
 
 
 def calc_destiny_number(birth_date_str: str) -> int | None:
+    if not birth_date_str:
+        return None
     try:
         for fmt in ("%Y-%m-%d", "%Y/%m/%d", "%Y%m%d"):
             try:
@@ -138,7 +142,7 @@ def build_system_prompt(level_info: dict) -> str:
         "4. カードの正位置・逆位置を踏まえた具体的な解釈を入れること。\n"
         "5. 最初に「アルカ」として一言挨拶してから占い結果に入る。\n"
         "6. 日本語で、絵文字を適度に使い、親しみやすさを保つ。\n"
-        "7. 結果は500文字以内に収める。\n"
+        "7. 結果は600〜700文字に収める。\n"
     )
 
     return base + persona + tone + rules
@@ -148,8 +152,11 @@ def build_system_prompt(level_info: dict) -> str:
 def build_tarot_prompt(cards: list[dict], question: str = "", user_info: dict | None = None, drill_down: dict | None = None, last_feedback: str | None = None) -> str:
     """タロット占いのプロンプトを構築（鑑定の質を強化）"""
 
+    if not cards:
+        raise ValueError("build_tarot_prompt: cards リストが空です")
+
     card_descriptions = []
-    for i, card in enumerate(cards):
+    for card in cards:
         pos = "逆位置" if card["reversed"] else "正位置"
         desc = f"- {card['name']}（{card['name_en']}）: {pos}"
         card_descriptions.append(desc)
@@ -220,10 +227,9 @@ def build_tarot_prompt(cards: list[dict], question: str = "", user_info: dict | 
     prompt = f"""以下のタロットカードで占いを行ってください。
 
 {spread_info}
-{user_part}{feedback_hint}
+{user_part}{feedback_hint}{question_part}
 引いたカード:
 {cards_text}
-{question_part}
 
 【鑑定の手順（必ずこの順番で構成すること）】
 
@@ -252,6 +258,6 @@ def build_tarot_prompt(cards: list[dict], question: str = "", user_info: dict | 
 - 星座や運命数に触れずにカードの一般論だけ述べること
 - 「〜かもしれない」「〜の可能性もある」など曖昧な表現の連発
 
-【目標文字数】400〜500文字。短すぎず、読み応えのある鑑定を。"""
+【目標文字数】600〜700文字。短すぎず、読み応えのある鑑定を。"""
 
     return prompt

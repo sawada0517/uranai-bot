@@ -11,7 +11,8 @@ import random
 import hashlib
 import hmac
 import base64
-from datetime import datetime, date
+import unicodedata
+from datetime import date
 from contextlib import asynccontextmanager
 
 import httpx
@@ -182,6 +183,7 @@ async def generate_tarot_reading(
 # ─── メッセージハンドラ ────────────────────────────────────
 async def handle_follow(user_id: str, reply_token: str):
     db.upsert_user(user_id)
+    db.set_onboarding_step(user_id, 1)
 
     arca_video = {
         "type": "video",
@@ -212,7 +214,8 @@ async def handle_unfollow(user_id: str):
 
 
 def _parse_birth_date(text: str) -> str | None:
-    text = text.strip()
+    # 全角数字・全角スラッシュなどを半角に正規化
+    text = unicodedata.normalize("NFKC", text).strip()
     patterns = [
         r"(\d{4})[/\-年](\d{1,2})[/\-月](\d{1,2})",
         r"(\d{4})(\d{2})(\d{2})",
@@ -245,6 +248,7 @@ async def handle_text_message(user_id: str, text: str, reply_token: str):
                 )}])
                 return
             db.update_birth_date(user_id, birth_date)
+            db.set_onboarding_step(user_id, 2)
             await reply_message(reply_token, [{
                 "type": "text",
                 "text": "ありがとう✨ もうひとつだけ教えてね！\n性別を選んでくれる？",
@@ -601,17 +605,18 @@ async def webhook(request: Request, x_line_signature: str = Header(None)):
     for event in data.get("events", []):
         user_id = event.get("source", {}).get("userId", "")
         reply_token = event.get("replyToken", "")
+        event_type = event.get("type")
 
-        if event["type"] == "follow":
+        if event_type == "follow":
             await handle_follow(user_id, reply_token)
 
-        elif event["type"] == "unfollow":
+        elif event_type == "unfollow":
             await handle_unfollow(user_id)
 
-        elif event["type"] == "message":
+        elif event_type == "message":
             msg = event.get("message", {})
             if msg.get("type") == "text":
-                await handle_text_message(user_id, msg["text"], reply_token)
+                await handle_text_message(user_id, msg.get("text", ""), reply_token)
 
     return JSONResponse(content={"status": "ok"})
 
